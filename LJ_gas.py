@@ -267,7 +267,28 @@ def ideal_gas_pressure(ps: ParticleSystem, sim: SimulationParameters) -> float:
     T = instantaneous_temperature(ps)  # in Kelvin
 
     return n_mol * R * T / V_in_m3  # Pressure in Pascals (Pa)
-    
+
+def virial_pressure(ps: ParticleSystem, sim: SimulationParameters) -> float:
+    """
+    Computes the instantaneous virial pressure of the system in Pascals (Pa), using the virial pressure: P = nRT/V + (∑r*F)/3V
+
+    Assumes:
+    - Virial pressure adds to ideal gas pressure to account for real gas behaviour.
+    - Positions are in nanometers (nm), volume is converted to m³.
+    - Temperature is in Kelvin.
+    - Pairwise interactions use identical sigma and epsilon values.
+    - Positions are in units compatible with sigma (e.g. nm).
+    - Returns pressure in SI units (Pa = J/m^3 = N/m^2).
+    """
+    L_in_nm = sim.box_length
+    V_in_m3 = L_in_nm**3 * 1e-27  # Convert volume to m³
+    P_ideal_in_Pa = ideal_gas_pressure(ps, sim) # Ideal gas term in Pascals (Pa)
+    force_in_kJpermol = calculate_force(ps, sim) # Force in kJ/mol
+    force_in_J = force_in_kJpermol * 1000 / Avogadro
+    P_virial_in_Pa = force_in_J / (3 * V_in_m3)
+
+    return P_ideal_in_Pa + P_virial_in_Pa
+
 #--------------------------------------
 # MD integrators
 #--------------------------------------
@@ -324,6 +345,9 @@ def calculate_force(ps: ParticleSystem, sim: SimulationParameters):
     # broadcasting to rij with shape (N_pairs, 3) is then possible
     f_ij = (dV_dr[:, np.newaxis] / r[:, np.newaxis]) * rij
 
+    # Virial force calculation
+    virial_force = np.sum(np.sum(rij * f_ij, axis = 1))
+
     # Initialize total force array
     force = np.zeros_like(ps.position)  # shape (N, 3)
 
@@ -334,6 +358,9 @@ def calculate_force(ps: ParticleSystem, sim: SimulationParameters):
 
     # update the force vector in the ParticleSystem class
     ps.force = force
+
+    # Returns force for virial calculation
+    return virial_force
 
 def A_step(ps: ParticleSystem, sim: SimulationParameters, half_step=False):
     """
@@ -450,7 +477,7 @@ def simulate_NVE_step(ps: ParticleSystem, sim: SimulationParameters):
     """
     B_step(ps, sim, half_step=True)   # update velocity by a half-step
     A_step(ps, sim, half_step=False)  # update position by a full time step
-    calculate_force(ps, sim)          # udpate force  
+    calculate_force(ps, sim)          # update force  
     B_step(ps, sim, half_step=True)   # update velocity by a second half-step
 
     apply_periodic_boundary(ps, sim)

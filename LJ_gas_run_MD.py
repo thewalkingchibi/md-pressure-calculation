@@ -38,7 +38,8 @@ from LJ_gas import(
     potential_energy,
     kinetic_energy,
     instantaneous_temperature,
-    ideal_gas_pressure
+    ideal_gas_pressure,
+    virial_pressure
     )
 
 #----------------------------------------------------------------
@@ -68,7 +69,7 @@ def toc():
 #   P A R A M E T E R S
 #----------------------------------------------------------------
 # system
-n_particles = 200
+n_particles = 800
 mass_argon =  39.95             # mass in u = 1e-3 kg/mol
 sigma_argon = 0.34              # sigma in nm     Argon: 0.34
 epsilon_argon = 120*R*1e-3      # epsilon in kJ/mol Argon: 120
@@ -128,18 +129,19 @@ E_pot_init = potential_energy(ps, sim)
 E_kin_init = kinetic_energy(ps)
 T_init = instantaneous_temperature(ps)
 P_init = ideal_gas_pressure(ps, sim)
-
+P_virial_init = virial_pressure(ps, sim)
 
 # initialize position trajectory
 position_trajectory = np.zeros((sim.n_steps+1, n_particles, 3))
 position_trajectory[0,:,:] = ps.position # initial position
 
 # initialize energy trajectory
-energy_trajectory = np.zeros((sim.n_steps+1, 4))
+energy_trajectory = np.zeros((sim.n_steps+1, 5))
 energy_trajectory[0,0] = potential_energy( ps, sim)       # potential energy
 energy_trajectory[0,1] = kinetic_energy(ps)               # kinetic energy
 energy_trajectory[0,2] = instantaneous_temperature(ps)    # instantaneous pressure
 energy_trajectory[0,3] = ideal_gas_pressure(ps, sim)      # ideal gas pressure
+energy_trajectory[0,4] = virial_pressure(ps, sim)         # virial pressure
 
 
 #--------------------------------------------------
@@ -159,6 +161,7 @@ for i in range(sim.n_steps):
     energy_trajectory[i+1,1] = kinetic_energy(ps)             # kinetic energy
     energy_trajectory[i+1,2] = instantaneous_temperature(ps)  # instantaneous pressure
     energy_trajectory[i+1,3] = ideal_gas_pressure(ps, sim)    # ideal gas pressure
+    energy_trajectory[i+1,4] = virial_pressure(ps, sim)        # virial pressure
 
 
 #--------------------------------------
@@ -223,16 +226,18 @@ plt.savefig(file_name_base + "_T.png", dpi=300, bbox_inches='tight')
 plt.show()
 
 #
-# pressure
+# ideal gas pressure & virial pressure
 # 
-P_min = np.mean(energy_trajectory[:,3]) - 200   # lower limit of P axis
-P_max = np.mean(energy_trajectory[:,3]) + 200   # upper limit of P axis 
+P_min = np.mean(energy_trajectory[:,4]) - 200   # lower limit of P axis
+P_max = np.mean(energy_trajectory[:,4]) + 200   # upper limit of P axis 
 
 plt.figure(figsize=(8, 6))
-plt.plot(time_ps, energy_trajectory[:,3]) 
+plt.plot(time_ps, energy_trajectory[:,3], color = 'orange', label = "ideal")
+plt.plot(time_ps, energy_trajectory[:,4], color = 'blue', label = "virial")
 plt.ylim(P_min, P_max)
 plt.xlabel("time [ps]", fontsize=14)
 plt.ylabel("P [Pa]", fontsize=14)
+plt.legend(loc = 'upper right')
 
 plt.savefig(file_name_base + "_P.png", dpi=300, bbox_inches='tight')
 plt.show()
