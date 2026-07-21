@@ -70,10 +70,10 @@ def run_quick_simulation(sigma, epsilon, mass, n_particles=100, n_steps=300,
                           tau_thermostat=1, rij_min=1e-2, n_equil=100,
                           seed=None):
     """
-    Runs a short, standalone NVT simulation for a given (sigma, epsilon) pair
+    Runs a short, standalone NVT simulation for a given (sigma, epsilon, volume) pair
     and returns the time-averaged ideal and virial pressures.
  
-    This is used to scan how sigma and epsilon affect the pressure, without
+    This is used to scan how sigma epsilon, and volume affect the pressure, without
     disturbing the main simulation's ParticleSystem/SimulationParameters
     objects or trajectories.
  
@@ -85,6 +85,7 @@ def run_quick_simulation(sigma, epsilon, mass, n_particles=100, n_steps=300,
                  the main production run, purely to keep the sweep fast).
         n_equil: number of initial steps to discard as equilibration before
                  averaging the pressures.
+        box_length: length of simulation box in nm, converted to volume in m^3
         seed: optional RNG seed for reproducibility.
  
     Returns:
@@ -126,7 +127,7 @@ def run_quick_simulation(sigma, epsilon, mass, n_particles=100, n_steps=300,
 #   P A R A M E T E R S
 #----------------------------------------------------------------
 # system
-n_particles = 200
+n_particles = 500
 mass_argon =  39.95             # mass in u = 1e-3 kg/mol
 sigma_argon = 0.34              # sigma in nm     Argon: 0.34
 epsilon_argon = 120*R*1e-3      # epsilon in kJ/mol Argon: 120
@@ -135,7 +136,7 @@ epsilon_argon = 120*R*1e-3      # epsilon in kJ/mol Argon: 120
 dt = 0.1             # ps
 n_steps = 1000 
 temperature = 300     # K
-box_length = 100      # nm
+box_length = 50      # nm
 tau_thermostat = 1  # thermostat coupling constant in 1/ps
 rij_min = 1e-2      # nm
 NVT = True          # switch to decide between NVT and NVE
@@ -330,14 +331,9 @@ plt.savefig(file_name_base + "_P_compare.png", dpi=300, bbox_inches='tight')
 plt.show()
  
  
-#----------------------------------------------------
-# E F F E C T   O F   S I G M A   A N D   E P S I L O N   O N   P R E S S U R E
-#----------------------------------------------------
-# The ideal-gas pressure only depends on N, T and V, so it is completely
-# insensitive to sigma and epsilon - only the virial pressure "feels" the
-# Lennard-Jones interactions. These short, independent sweep simulations
-# make that visible directly.
-#
+#---------------------------------------------------------
+# E F F E C T   O F   S I G M A   O N   P R E S S U R E
+#---------------------------------------------------------
 # Sweeps use a smaller system / fewer steps than the production run above,
 # purely to keep the total runtime reasonable; increase n_particles/n_steps
 # for smoother, more accurate averages.
@@ -346,6 +342,7 @@ print("\nRunning sigma sweep (this may take a while)...")
  
 sigma_values = np.array([0.30, 0.32, 0.34, 0.36, 0.38, 0.40])   # nm
 epsilon_fixed = epsilon_argon
+box_length_fixed = box_length
  
 P_ideal_vs_sigma = np.zeros_like(sigma_values)
 P_virial_vs_sigma = np.zeros_like(sigma_values)
@@ -365,6 +362,10 @@ plt.title(f"Pressure vs. sigma (epsilon = {epsilon_fixed:.4f} kJ/mol)")
 plt.savefig(file_name_base + "_P_vs_sigma.png", dpi=300, bbox_inches='tight')
 plt.show()
  
+
+#------------------------------------------------------------
+# E F F E C T   O F   E P S I L O N   O N   P R E S S U R E
+#------------------------------------------------------------ 
 print("Running epsilon sweep (this may take a while)...")
  
 epsilon_values = np.linspace(0.5, 2.0, 6) * epsilon_argon
@@ -388,6 +389,54 @@ plt.title(f"Pressure vs. epsilon (sigma = {sigma_fixed:.3f} nm)")
 plt.savefig(file_name_base + "_P_vs_epsilon.png", dpi=300, bbox_inches='tight')
 plt.show()
 
+
+#---------------------------------------------------------------------------------
+# E F F E C T   O F   B O X   L E N G T H / V O L U M E   O N   P R E S S U R E
+#  (Boyle's law: at fixed N and T, P should scale as 1/V, i.e. P*V = const)
+#---------------------------------------------------------------------------------
+print("\nRunning box-length (volume) sweep to test Boyle's law...")
+ 
+n_particles_fixed = 100   # keep N fixed across the sweep, same value used above
+box_length_values = np.array([170, 190, 210, 240, 270, 300, 320])   # nm
+ 
+P_ideal_vs_L = np.zeros_like(box_length_values, dtype=float)
+P_virial_vs_L = np.zeros_like(box_length_values, dtype=float)
+ 
+for idx, L in enumerate(box_length_values):
+    P_ideal_vs_L[idx], P_virial_vs_L[idx] = run_quick_simulation(
+        sigma=sigma_argon, epsilon=epsilon_argon, mass=mass_argon,
+        n_particles=n_particles_fixed, box_length=L, seed=0)
+ 
+V_values_m3 = (box_length_values.astype(float)**3) * 1e-27   # nm^3 -> m^3
+
+#
+# P vs V
+#
+plt.figure(figsize=(8, 6))
+plt.plot(V_values_m3, P_ideal_vs_L, 'o-', label="ideal gas pressure")
+plt.plot(V_values_m3, P_virial_vs_L, 's-', label="virial pressure")
+plt.xlabel("V [m^3]", fontsize=14)
+plt.ylabel("time-averaged P [Pa]", fontsize=14)
+plt.legend(fontsize=12)
+plt.title(f"Pressure vs. Volume (N={n_particles_fixed}, T={temperature} K)")
+ 
+plt.savefig(file_name_base + "_P_vs_V.png", dpi=300, bbox_inches='tight')
+plt.show()
+ 
+#
+# P*V vs V
+#
+plt.figure(figsize=(8, 6))
+plt.plot(V_values_m3, P_ideal_vs_L * V_values_m3, 'o-', label="ideal gas: P*V")
+plt.plot(V_values_m3, P_virial_vs_L * V_values_m3, 's-', label="virial: P*V")
+plt.xlabel("V [m^3]", fontsize=14)
+plt.ylabel("P*V [J]", fontsize=14)
+plt.legend(fontsize=12)
+plt.title("Boyle's Law: PV vs. V should be constant at fixed N, T")
+ 
+plt.savefig(file_name_base + "_PV_vs_V.png", dpi=300, bbox_inches='tight')
+plt.show()
+ 
 
 #--------------------------------------
 # O U T P U T 
