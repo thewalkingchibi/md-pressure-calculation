@@ -39,7 +39,8 @@ from LJ_gas import(
     kinetic_energy,
     instantaneous_temperature,
     ideal_gas_pressure,
-    virial_pressure
+    virial_pressure,
+    total_pressure
     )
 
 #----------------------------------------------------------------
@@ -70,7 +71,7 @@ def run_quick_simulation(sigma, epsilon, mass, n_particles=100, n_steps=300,
                           seed=None):
     """
     Runs a short, standalone NVT simulation for a given (sigma, epsilon) pair
-    and returns the time-averaged ideal-gas and virial pressures.
+    and returns the time-averaged ideal and virial pressures.
  
     This is used to scan how sigma and epsilon affect the pressure, without
     disturbing the main simulation's ParticleSystem/SimulationParameters
@@ -107,12 +108,12 @@ def run_quick_simulation(sigma, epsilon, mass, n_particles=100, n_steps=300,
     P_ideal_series = np.zeros(n_steps + 1)
     P_virial_series = np.zeros(n_steps + 1)
     P_ideal_series[0] = ideal_gas_pressure(ps_q, sim_q)
-    P_virial_series[0] = virial_pressure(ps_q, sim_q)
+    P_virial_series[0] = total_pressure(ps_q, sim_q)
  
     for i in range(n_steps):
         simulate_NVT_step(ps_q, sim_q)
         P_ideal_series[i + 1] = ideal_gas_pressure(ps_q, sim_q)
-        P_virial_series[i + 1] = virial_pressure(ps_q, sim_q)
+        P_virial_series[i + 1] = total_pressure(ps_q, sim_q)
  
     # average over the post-equilibration window
     P_ideal_avg = np.mean(P_ideal_series[n_equil:])
@@ -192,12 +193,13 @@ position_trajectory = np.zeros((sim.n_steps+1, n_particles, 3))
 position_trajectory[0,:,:] = ps.position # initial position
 
 # initialize energy trajectory
-energy_trajectory = np.zeros((sim.n_steps+1, 5))
+energy_trajectory = np.zeros((sim.n_steps+1, 6))
 energy_trajectory[0,0] = potential_energy( ps, sim)       # potential energy
 energy_trajectory[0,1] = kinetic_energy(ps)               # kinetic energy
 energy_trajectory[0,2] = instantaneous_temperature(ps)    # instantaneous pressure
 energy_trajectory[0,3] = ideal_gas_pressure(ps, sim)      # ideal gas pressure
-energy_trajectory[0,4] = virial_pressure(ps, sim)         # virial pressure
+energy_trajectory[0,4] = virial_pressure(ps, sim)         # virial contribution
+energy_trajectory[0,5] = energy_trajectory[0,3] + energy_trajectory[0,4]    # total pressure (ideal + virial)
 
 
 #--------------------------------------------------
@@ -217,7 +219,8 @@ for i in range(sim.n_steps):
     energy_trajectory[i+1,1] = kinetic_energy(ps)             # kinetic energy
     energy_trajectory[i+1,2] = instantaneous_temperature(ps)  # instantaneous pressure
     energy_trajectory[i+1,3] = ideal_gas_pressure(ps, sim)    # ideal gas pressure
-    energy_trajectory[i+1,4] = virial_pressure(ps, sim)       # virial pressure
+    energy_trajectory[i+1,4] = virial_pressure(ps, sim)       # virial contribution
+    energy_trajectory[i+1,5] = total_pressure(ps, sim)        # total pressure
 
 #--------------------------------------
 # W R I T E    T R A J E C T O R I E S 
@@ -296,26 +299,27 @@ plt.savefig(file_name_base + "_Pideal.png", dpi=300, bbox_inches='tight')
 plt.show()
 
 #
-# virial pressure
+# total pressure 
 #
-Pvirial_min = np.mean(energy_trajectory[:,4]) - 200   # lower limit of P axis
-Pvirial_max = np.mean(energy_trajectory[:,4]) + 200   # upper limit of P axis
+Ptotal_min = np.mean(energy_trajectory[:,5]) - 200   # lower limit of P axis
+Ptotal_max = np.mean(energy_trajectory[:,5]) + 200   # upper limit of P axis
  
 plt.figure(figsize=(8, 6))
-plt.plot(time_ps, energy_trajectory[:,4])
-plt.ylim(Pvirial_min, Pvirial_max)
+plt.plot(time_ps, energy_trajectory[:,5])
+plt.ylim(Ptotal_min, Ptotal_max)
 plt.xlabel("time [ps]", fontsize=14)
-plt.ylabel("P_virial [Pa]", fontsize=14)
+plt.ylabel("P_total [Pa]", fontsize=14)
  
 plt.savefig(file_name_base + "_Pvirial.png", dpi=300, bbox_inches='tight')
 plt.show()
  
 #
-# ideal-gas vs virial pressure, side by side
+# ideal pressure + total pressure + virial contribution
 #
 plt.figure(figsize=(8, 6))
 plt.plot(time_ps, energy_trajectory[:,3], label="ideal gas pressure", alpha=0.8)
-plt.plot(time_ps, energy_trajectory[:,4], label="virial pressure", alpha=0.8)
+plt.plot(time_ps, energy_trajectory[:,5], label="total pressure", alpha=0.8)
+plt.plot(time_ps, energy_trajectory[:,4], label="virial contribution", alpha=0.8)
 plt.xlabel("time [ps]", fontsize=14)
 plt.ylabel("P [Pa]", fontsize=14)
 plt.legend(fontsize=12)

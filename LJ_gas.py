@@ -270,30 +270,17 @@ def ideal_gas_pressure(ps: ParticleSystem, sim: SimulationParameters) -> float:
 
 def virial_pressure(ps: ParticleSystem, sim: SimulationParameters) -> float:
     """
-    Computes the instantaneous virial pressure of the system in Pascals (Pa), using the
-    Clausius virial theorem: P = nRT/V  +  (∑r_ij . F_ij)/3V
- 
-    The first term is the ideal (kinetic) contribution, identical to
-    ideal_gas_pressure(). The second term is the virial correction arising
-    from the Lennard-Jones interactions, and is what makes this pressure
-    sensitive to sigma and epsilon (unlike the purely kinetic ideal-gas
-    pressure, which only depends on N, T and V).
- 
-    For a pair interaction with r_ij = r_i - r_j and F_ij the force that
-    particle j exerts on particle i, one has
- 
-        r_ij . F_ij = -(dV/dr)*r
- 
-    so the virial sum can be built directly from the same pairwise
-    distances and dV/dr values used in calculate_force().
+    Computes the instantaneous virial contribution of the system in Pascals (Pa), using the
+    Clausius virial theorem (only the second term): P = nRT/V  +  (∑r_ij . F_ij)/3V
  
     Assumes:
+        - Virial contribution arises from Lennard-Jones interactions, calculated in calculate_force() function.
         - Uniform sigma and epsilon (taken from particle 0).
         - Positions in nm, sigma in nm, epsilon in kJ/mol (as elsewhere in
           this module).
  
     Returns:
-        Pressure in Pascals (Pa).
+        Virial pressure contribution in Pascals (Pa).
     """
     # Volume
     L = sim.box_length
@@ -302,13 +289,31 @@ def virial_pressure(ps: ParticleSystem, sim: SimulationParameters) -> float:
     # Virial sum: ∑r_ij . F_ij = -∑(dV/dr)*r
     virial_sum_J = calculate_force(ps, sim)
     
-    # Virial correction (∑r_ij . F_ij)/3V
-    P_virial_correction = virial_sum_J / (3 * V_in_m3)
+    # Virial term: (∑r_ij . F_ij)/3V
+    P_virial = virial_sum_J / (3 * V_in_m3)
  
+    return P_virial
+
+def total_pressure(ps: ParticleSystem, sim: SimulationParameters) -> float:
+    """
+    Computes the instantaneous total pressure of the system in Pascals (Pa), using the
+    Clausius virial theorem: P = nRT/V  +  (∑r_ij . F_ij)/3V
+ 
+    Assumes:
+        - Kinetic contribution is in Pa, taken from ideal_gas_pressure().
+        - Virial contribution is in Pa, taken from virial_pressure().
+        - Total pressure is the sum of the kinetic & virial contributions.
+ 
+    Returns:
+        Total pressure in Pascals (Pa).
+    """
     # Ideal gas term: nRT/V
     P_kinetic = ideal_gas_pressure(ps, sim)
+
+    # Virial term: (∑r_ij . F_ij)/3V
+    P_virial = virial_pressure(ps, sim)
  
-    return P_kinetic + P_virial_correction
+    return P_virial + P_kinetic
 
 
 #--------------------------------------
