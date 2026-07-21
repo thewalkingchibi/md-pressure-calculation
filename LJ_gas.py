@@ -268,27 +268,45 @@ def ideal_gas_pressure(ps: ParticleSystem, sim: SimulationParameters) -> float:
 
     return n_mol * R * T / V_in_m3  # Pressure in Pascals (Pa)
 
-def virial_pressure(ps: ParticleSystem, sim: SimulationParameters) -> float:
+def virial_pressure(ps: ParticleSystem,
+                    sim: SimulationParameters) -> float:
     """
-    Computes the instantaneous virial pressure of the system in Pascals (Pa), using the virial pressure: P = nRT/V + (∑r*F)/3V
+    Computes only the virial contribution to the instantaneous pressure.
 
-    Assumes:
-    - Virial pressure adds to ideal gas pressure to account for real gas behaviour.
-    - Positions are in nanometers (nm), volume is converted to m³.
-    - Temperature is in Kelvin.
-    - Pairwise interactions use identical sigma and epsilon values.
-    - Positions are in units compatible with sigma (e.g. nm).
-    - Returns pressure in SI units (Pa = J/m^3 = N/m^2).
+    Formula:
+        P_virial = W / (3V)
+
+    where:
+        W = sum_{i<j} r_ij · F_ij
+
+    Returns:
+        Virial pressure contribution in Pa.
     """
-    L_in_nm = sim.box_length
-    V_in_m3 = L_in_nm**3 * 1e-27  # Convert volume to m³
-    P_ideal_in_Pa = ideal_gas_pressure(ps, sim) # Ideal gas term in Pascals (Pa)
-    force_in_kJpermol = calculate_force(ps, sim) # Force in kJ/mol
-    force_in_J = force_in_kJpermol * 1000 / Avogadro
-    P_virial_in_Pa = force_in_J / (3 * V_in_m3)
+    volume_m3 = sim.box_length**3 * 1e-27
 
-    return P_ideal_in_Pa + P_virial_in_Pa
+    # calculate_force returns the virial W in kJ/mol
+    virial_kj_per_mol = calculate_force(ps, sim)
 
+    # Convert kJ/mol to J for the actual simulated system
+    virial_joule = virial_kj_per_mol * 1000 / Avogadro
+
+    return virial_joule / (3.0 * volume_m3)
+
+def total_pressure(ps: ParticleSystem,
+                   sim: SimulationParameters) -> float:
+    """
+    Computes the total instantaneous pressure.
+
+    Formula:
+        P_total = P_ideal + P_virial
+
+    Returns:
+        Total pressure in Pa.
+    """
+    return (
+        ideal_gas_pressure(ps, sim)
+        + virial_pressure(ps, sim)
+    )
 #--------------------------------------
 # MD integrators
 #--------------------------------------
@@ -346,7 +364,7 @@ def calculate_force(ps: ParticleSystem, sim: SimulationParameters):
     f_ij = (dV_dr[:, np.newaxis] / r[:, np.newaxis]) * rij
 
     # Virial force calculation
-    virial_force = np.sum(np.sum(rij * f_ij, axis = 1))
+    virial_force = -np.sum(np.sum(rij * f_ij, axis=1))
 
     # Initialize total force array
     force = np.zeros_like(ps.position)  # shape (N, 3)

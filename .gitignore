@@ -1,0 +1,19 @@
+# Python virtual environment
+.venv/
+
+# Python cache files
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# macOS system file
+.DS_Store
+
+# Partner's separate results folder
+Alise_Plots/
+
+# Large raw simulation outputs
+my_simulation_ene.npy
+my_simulation_pos.xyz
+my_simulation.out
