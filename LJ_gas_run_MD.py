@@ -186,6 +186,7 @@ E_pot_init = potential_energy(ps, sim)
 E_kin_init = kinetic_energy(ps)
 T_init = instantaneous_temperature(ps)
 P_init = ideal_gas_pressure(ps, sim)
+P_virialinit = virial_pressure(ps, sim)
 
 
 # initialize position trajectory
@@ -220,7 +221,7 @@ for i in range(sim.n_steps):
     energy_trajectory[i+1,2] = instantaneous_temperature(ps)  # instantaneous pressure
     energy_trajectory[i+1,3] = ideal_gas_pressure(ps, sim)    # ideal gas pressure
     energy_trajectory[i+1,4] = virial_pressure(ps, sim)       # virial contribution
-    energy_trajectory[i+1,5] = total_pressure(ps, sim)        # total pressure
+    energy_trajectory[i+1,5] = energy_trajectory[i+1,3] + energy_trajectory[i+1,4]     # total pressure
 
 #--------------------------------------
 # W R I T E    T R A J E C T O R I E S 
@@ -290,7 +291,7 @@ Pideal_min = np.mean(energy_trajectory[:,3]) - 200   # lower limit of P axis
 Pideal_max = np.mean(energy_trajectory[:,3]) + 200   # upper limit of P axis 
 
 plt.figure(figsize=(8, 6))
-plt.plot(time_ps, energy_trajectory[:,3]) 
+plt.plot(time_ps, energy_trajectory[:,3], color = 'orange') 
 plt.ylim(Pideal_min, Pideal_max)
 plt.xlabel("time [ps]", fontsize=14)
 plt.ylabel("P_ideal [Pa]", fontsize=14)
@@ -305,25 +306,25 @@ Ptotal_min = np.mean(energy_trajectory[:,5]) - 200   # lower limit of P axis
 Ptotal_max = np.mean(energy_trajectory[:,5]) + 200   # upper limit of P axis
  
 plt.figure(figsize=(8, 6))
-plt.plot(time_ps, energy_trajectory[:,5])
+plt.plot(time_ps, energy_trajectory[:,5], color = 'green')
 plt.ylim(Ptotal_min, Ptotal_max)
 plt.xlabel("time [ps]", fontsize=14)
-plt.ylabel("P_total [Pa]", fontsize=14)
+plt.ylabel("P_virial [Pa]", fontsize=14)
  
 plt.savefig(file_name_base + "_Pvirial.png", dpi=300, bbox_inches='tight')
 plt.show()
  
 #
-# ideal pressure + total pressure + virial contribution
+# ideal vs. virial pressure comparison
 #
 plt.figure(figsize=(8, 6))
-plt.plot(time_ps, energy_trajectory[:,3], label="ideal gas pressure", alpha=0.8)
-plt.plot(time_ps, energy_trajectory[:,5], label="total pressure", alpha=0.8)
-plt.plot(time_ps, energy_trajectory[:,4], label="virial contribution", alpha=0.8)
+plt.plot(time_ps, energy_trajectory[:,3], label="ideal gas pressure", alpha=0.8, color = 'orange')
+plt.plot(time_ps, energy_trajectory[:,5], label="total pressure", alpha=0.8, color = 'green')
+plt.plot(time_ps, energy_trajectory[:,4], label="virial contribution", alpha=0.8, color = 'blue')
 plt.xlabel("time [ps]", fontsize=14)
 plt.ylabel("P [Pa]", fontsize=14)
 plt.legend(fontsize=12)
-plt.title("Ideal-gas vs. virial pressure")
+plt.title("Ideal Pressure vs. Virial Pressure")
  
 plt.savefig(file_name_base + "_P_compare.png", dpi=300, bbox_inches='tight')
 plt.show()
@@ -354,8 +355,8 @@ for idx, s in enumerate(sigma_values):
         sigma=s, epsilon=epsilon_fixed, mass=mass_argon, seed=0)
  
 plt.figure(figsize=(8, 6))
-plt.plot(sigma_values, P_ideal_vs_sigma, 'o-', label="ideal gas pressure")
-plt.plot(sigma_values, P_virial_vs_sigma, 's-', label="virial pressure")
+plt.plot(sigma_values, P_ideal_vs_sigma, 'o-', label="ideal gas pressure", color = 'orange')
+plt.plot(sigma_values, P_virial_vs_sigma, 's-', label="virial pressure", color = 'green')
 plt.xlabel("sigma [nm]", fontsize=14)
 plt.ylabel("time-averaged P [Pa]", fontsize=14)
 plt.legend(fontsize=12)
