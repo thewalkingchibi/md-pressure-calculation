@@ -38,7 +38,8 @@ from LJ_gas import(
     potential_energy,
     kinetic_energy,
     instantaneous_temperature,
-    ideal_gas_pressure
+    ideal_gas_pressure,
+    virial_pressure
     )
 
 #----------------------------------------------------------------
@@ -63,6 +64,62 @@ def toc():
     
     return elapsed_time
 
+def run_quick_simulation(sigma, epsilon, mass, n_particles=100, n_steps=300,
+                          dt=0.1, temperature=300, box_length=100,
+                          tau_thermostat=1, rij_min=1e-2, n_equil=100,
+                          seed=None):
+    """
+    Runs a short, standalone NVT simulation for a given (sigma, epsilon) pair
+    and returns the time-averaged ideal-gas and virial pressures.
+ 
+    This is used to scan how sigma and epsilon affect the pressure, without
+    disturbing the main simulation's ParticleSystem/SimulationParameters
+    objects or trajectories.
+ 
+    Parameters:
+        sigma, epsilon: Lennard-Jones parameters to test (nm, kJ/mol).
+        mass: particle mass in u (kept fixed across the sweep).
+        n_particles, n_steps, dt, temperature, box_length, tau_thermostat,
+        rij_min: simulation settings for the short run (smaller/shorter than
+                 the main production run, purely to keep the sweep fast).
+        n_equil: number of initial steps to discard as equilibration before
+                 averaging the pressures.
+        seed: optional RNG seed for reproducibility.
+ 
+    Returns:
+        (P_ideal_avg, P_virial_avg) in Pascals.
+    """
+    if seed is not None:
+        np.random.seed(seed)
+ 
+    sim_q = SimulationParameters(dt=dt, n_steps=n_steps, temperature=temperature,
+                                  box_length=box_length,
+                                  tau_thermostat=tau_thermostat, rij_min=rij_min)
+ 
+    ps_q = ParticleSystem(n_particles)
+    for i in range(n_particles):
+        ps_q.set_parameters(i, mass=mass, sigma=sigma, epsilon=epsilon)
+ 
+    initialize_positions(ps_q, sim_q.box_length)
+    initialize_velocities(ps_q, sim_q.temperature)
+    calculate_force(ps_q, sim_q)
+ 
+    P_ideal_series = np.zeros(n_steps + 1)
+    P_virial_series = np.zeros(n_steps + 1)
+    P_ideal_series[0] = ideal_gas_pressure(ps_q, sim_q)
+    P_virial_series[0] = virial_pressure(ps_q, sim_q)
+ 
+    for i in range(n_steps):
+        simulate_NVT_step(ps_q, sim_q)
+        P_ideal_series[i + 1] = ideal_gas_pressure(ps_q, sim_q)
+        P_virial_series[i + 1] = virial_pressure(ps_q, sim_q)
+ 
+    # average over the post-equilibration window
+    P_ideal_avg = np.mean(P_ideal_series[n_equil:])
+    P_virial_avg = np.mean(P_virial_series[n_equil:])
+ 
+    return P_ideal_avg, P_virial_avg
+ 
 
 #----------------------------------------------------------------
 #   P A R A M E T E R S
@@ -135,11 +192,12 @@ position_trajectory = np.zeros((sim.n_steps+1, n_particles, 3))
 position_trajectory[0,:,:] = ps.position # initial position
 
 # initialize energy trajectory
-energy_trajectory = np.zeros((sim.n_steps+1, 4))
+energy_trajectory = np.zeros((sim.n_steps+1, 5))
 energy_trajectory[0,0] = potential_energy( ps, sim)       # potential energy
 energy_trajectory[0,1] = kinetic_energy(ps)               # kinetic energy
 energy_trajectory[0,2] = instantaneous_temperature(ps)    # instantaneous pressure
 energy_trajectory[0,3] = ideal_gas_pressure(ps, sim)      # ideal gas pressure
+energy_trajectory[0,4] = virial_pressure(ps, sim)         # virial pressure
 
 
 #--------------------------------------------------
@@ -159,7 +217,7 @@ for i in range(sim.n_steps):
     energy_trajectory[i+1,1] = kinetic_energy(ps)             # kinetic energy
     energy_trajectory[i+1,2] = instantaneous_temperature(ps)  # instantaneous pressure
     energy_trajectory[i+1,3] = ideal_gas_pressure(ps, sim)    # ideal gas pressure
-
+    energy_trajectory[i+1,4] = virial_pressure(ps, sim)       # virial pressure
 
 #--------------------------------------
 # W R I T E    T R A J E C T O R I E S 
@@ -168,7 +226,7 @@ for i in range(sim.n_steps):
 write_xyz_trajectory(file_name_base + "_pos.xyz", position_trajectory, atom_symbol="Ar")
 # write energy trajectory to file (binary and text)
 np.save(file_name_base + "_ene.npy", energy_trajectory)
-np.savetxt(file_name_base + "_ene.dat", energy_trajectory, fmt="%.6e", header="#E_pot  E_kin  T  P", comments='')
+np.savetxt(file_name_base + "_ene.dat", energy_trajectory, fmt="%.6e", header="#E_pot  E_kin  T  P_ideal P_virial", comments='')
 
 
 #----------------------------------------------------
@@ -223,18 +281,106 @@ plt.savefig(file_name_base + "_T.png", dpi=300, bbox_inches='tight')
 plt.show()
 
 #
-# pressure
+# ideal gas pressure
 # 
-P_min = np.mean(energy_trajectory[:,3]) - 200   # lower limit of P axis
-P_max = np.mean(energy_trajectory[:,3]) + 200   # upper limit of P axis 
+Pideal_min = np.mean(energy_trajectory[:,3]) - 200   # lower limit of P axis
+Pideal_max = np.mean(energy_trajectory[:,3]) + 200   # upper limit of P axis 
 
 plt.figure(figsize=(8, 6))
 plt.plot(time_ps, energy_trajectory[:,3]) 
-plt.ylim(P_min, P_max)
+plt.ylim(Pideal_min, Pideal_max)
+plt.xlabel("time [ps]", fontsize=14)
+plt.ylabel("P_ideal [Pa]", fontsize=14)
+
+plt.savefig(file_name_base + "_Pideal.png", dpi=300, bbox_inches='tight')
+plt.show()
+
+#
+# virial pressure
+#
+Pvirial_min = np.mean(energy_trajectory[:,4]) - 200   # lower limit of P axis
+Pvirial_max = np.mean(energy_trajectory[:,4]) + 200   # upper limit of P axis
+ 
+plt.figure(figsize=(8, 6))
+plt.plot(time_ps, energy_trajectory[:,4])
+plt.ylim(Pvirial_min, Pvirial_max)
+plt.xlabel("time [ps]", fontsize=14)
+plt.ylabel("P_virial [Pa]", fontsize=14)
+ 
+plt.savefig(file_name_base + "_Pvirial.png", dpi=300, bbox_inches='tight')
+plt.show()
+ 
+#
+# ideal-gas vs virial pressure, side by side
+#
+plt.figure(figsize=(8, 6))
+plt.plot(time_ps, energy_trajectory[:,3], label="ideal gas pressure", alpha=0.8)
+plt.plot(time_ps, energy_trajectory[:,4], label="virial pressure", alpha=0.8)
 plt.xlabel("time [ps]", fontsize=14)
 plt.ylabel("P [Pa]", fontsize=14)
-
-plt.savefig(file_name_base + "_P.png", dpi=300, bbox_inches='tight')
+plt.legend(fontsize=12)
+plt.title("Ideal-gas vs. virial pressure")
+ 
+plt.savefig(file_name_base + "_P_compare.png", dpi=300, bbox_inches='tight')
+plt.show()
+ 
+ 
+#----------------------------------------------------
+# E F F E C T   O F   S I G M A   A N D   E P S I L O N   O N   P R E S S U R E
+#----------------------------------------------------
+# The ideal-gas pressure only depends on N, T and V, so it is completely
+# insensitive to sigma and epsilon - only the virial pressure "feels" the
+# Lennard-Jones interactions. These short, independent sweep simulations
+# make that visible directly.
+#
+# Sweeps use a smaller system / fewer steps than the production run above,
+# purely to keep the total runtime reasonable; increase n_particles/n_steps
+# for smoother, more accurate averages.
+ 
+print("\nRunning sigma sweep (this may take a while)...")
+ 
+sigma_values = np.array([0.30, 0.32, 0.34, 0.36, 0.38, 0.40])   # nm
+epsilon_fixed = epsilon_argon
+ 
+P_ideal_vs_sigma = np.zeros_like(sigma_values)
+P_virial_vs_sigma = np.zeros_like(sigma_values)
+ 
+for idx, s in enumerate(sigma_values):
+    P_ideal_vs_sigma[idx], P_virial_vs_sigma[idx] = run_quick_simulation(
+        sigma=s, epsilon=epsilon_fixed, mass=mass_argon, seed=0)
+ 
+plt.figure(figsize=(8, 6))
+plt.plot(sigma_values, P_ideal_vs_sigma, 'o-', label="ideal gas pressure")
+plt.plot(sigma_values, P_virial_vs_sigma, 's-', label="virial pressure")
+plt.xlabel("sigma [nm]", fontsize=14)
+plt.ylabel("time-averaged P [Pa]", fontsize=14)
+plt.legend(fontsize=12)
+plt.title(f"Pressure vs. sigma (epsilon = {epsilon_fixed:.4f} kJ/mol)")
+ 
+plt.savefig(file_name_base + "_P_vs_sigma.png", dpi=300, bbox_inches='tight')
+plt.show()
+ 
+print("Running epsilon sweep (this may take a while)...")
+ 
+epsilon_values = np.linspace(0.5, 2.0, 6) * epsilon_argon
+sigma_fixed = sigma_argon
+ 
+P_ideal_vs_epsilon = np.zeros_like(epsilon_values)
+P_virial_vs_epsilon = np.zeros_like(epsilon_values)
+ 
+for idx, e in enumerate(epsilon_values):
+    P_ideal_vs_epsilon[idx], P_virial_vs_epsilon[idx] = run_quick_simulation(
+        sigma=sigma_fixed, epsilon=e, mass=mass_argon, seed=0)
+ 
+plt.figure(figsize=(8, 6))
+plt.plot(epsilon_values, P_ideal_vs_epsilon, 'o-', label="ideal gas pressure")
+plt.plot(epsilon_values, P_virial_vs_epsilon, 's-', label="virial pressure")
+plt.xlabel("epsilon [kJ/mol]", fontsize=14)
+plt.ylabel("time-averaged P [Pa]", fontsize=14)
+plt.legend(fontsize=12)
+plt.title(f"Pressure vs. epsilon (sigma = {sigma_fixed:.3f} nm)")
+ 
+plt.savefig(file_name_base + "_P_vs_epsilon.png", dpi=300, bbox_inches='tight')
 plt.show()
 
 

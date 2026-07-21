@@ -267,7 +267,50 @@ def ideal_gas_pressure(ps: ParticleSystem, sim: SimulationParameters) -> float:
     T = instantaneous_temperature(ps)  # in Kelvin
 
     return n_mol * R * T / V_in_m3  # Pressure in Pascals (Pa)
+
+def virial_pressure(ps: ParticleSystem, sim: SimulationParameters) -> float:
+    """
+    Computes the instantaneous virial pressure of the system in Pascals (Pa), using the
+    Clausius virial theorem: P = nRT/V  +  (∑r_ij . F_ij)/3V
+ 
+    The first term is the ideal (kinetic) contribution, identical to
+    ideal_gas_pressure(). The second term is the virial correction arising
+    from the Lennard-Jones interactions, and is what makes this pressure
+    sensitive to sigma and epsilon (unlike the purely kinetic ideal-gas
+    pressure, which only depends on N, T and V).
+ 
+    For a pair interaction with r_ij = r_i - r_j and F_ij the force that
+    particle j exerts on particle i, one has
+ 
+        r_ij . F_ij = -(dV/dr)*r
+ 
+    so the virial sum can be built directly from the same pairwise
+    distances and dV/dr values used in calculate_force().
+ 
+    Assumes:
+        - Uniform sigma and epsilon (taken from particle 0).
+        - Positions in nm, sigma in nm, epsilon in kJ/mol (as elsewhere in
+          this module).
+ 
+    Returns:
+        Pressure in Pascals (Pa).
+    """
+    # Volume
+    L = sim.box_length
+    V_in_m3 = L**3 * 1e-27  # nm^3 -> m^3
+ 
+    # Virial sum: ∑r_ij . F_ij = -∑(dV/dr)*r
+    virial_sum_J = calculate_force(ps, sim)
     
+    # Virial correction (∑r_ij . F_ij)/3V
+    P_virial_correction = virial_sum_J / (3 * V_in_m3)
+ 
+    # Ideal gas term: nRT/V
+    P_kinetic = ideal_gas_pressure(ps, sim)
+ 
+    return P_kinetic + P_virial_correction
+
+
 #--------------------------------------
 # MD integrators
 #--------------------------------------
@@ -319,6 +362,10 @@ def calculate_force(ps: ParticleSystem, sim: SimulationParameters):
     sr6 = (sigma / r)**6                            # shape (N_pairs,)
     dV_dr = 24 * epsilon / r * (-2 * sr6**2 + sr6)  # shape (N_pairs,)
 
+    # Virial sum: ∑r_ij . F_ij = -∑(dV/dr)*r
+    virial_sum_kJpermol = -np.sum(dV_dr * r)
+    virial_sum_J = virial_sum_kJpermol * 1e3 / Avogadro
+
     # Force vectors: shape (N_pairs, 3)
     # dV_dr[:, np.newaxis] shapes it to (N_pairs, 1), i.e. 2D column vector
     # broadcasting to rij with shape (N_pairs, 3) is then possible
@@ -334,6 +381,9 @@ def calculate_force(ps: ParticleSystem, sim: SimulationParameters):
 
     # update the force vector in the ParticleSystem class
     ps.force = force
+
+    # Return virial sum
+    return virial_sum_J
 
 def A_step(ps: ParticleSystem, sim: SimulationParameters, half_step=False):
     """
