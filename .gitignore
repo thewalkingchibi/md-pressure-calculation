@@ -1,0 +1,11 @@
+# Python environment and cache
+.venv/
+__pycache__/
+*.pyc
+
+# Large/generated simulation data
+*.npy
+*.xyz
+*.out
+epsilon_sweep_results.dat
+my_simulation_ene.dat

@@ -19,7 +19,7 @@ the simulation workflow.
 #   I M P O R T S
 #----------------------------------------------------------------
 import numpy as np
-from scipy.constants import R
+from scipy.constants import R, k
 import matplotlib.pyplot as plt
 
 import time
@@ -40,7 +40,6 @@ from LJ_gas import(
     instantaneous_temperature,
     ideal_gas_pressure,
     virial_pressure,
-    total_pressure
     )
 
 #----------------------------------------------------------------
@@ -89,7 +88,7 @@ def run_quick_simulation(sigma, epsilon, mass, n_particles=100, n_steps=300,
         seed: optional RNG seed for reproducibility.
  
     Returns:
-        (P_ideal_avg, P_virial_avg) in Pascals.
+        (P_ideal_avg, P_virial_avg, P_total_avg) in Pascals.
     """
     if seed is not None:
         np.random.seed(seed)
@@ -101,26 +100,35 @@ def run_quick_simulation(sigma, epsilon, mass, n_particles=100, n_steps=300,
     ps_q = ParticleSystem(n_particles)
     for i in range(n_particles):
         ps_q.set_parameters(i, mass=mass, sigma=sigma, epsilon=epsilon)
- 
+
     initialize_positions(ps_q, sim_q.box_length)
     initialize_velocities(ps_q, sim_q.temperature)
     calculate_force(ps_q, sim_q)
  
     P_ideal_series = np.zeros(n_steps + 1)
     P_virial_series = np.zeros(n_steps + 1)
+    P_total_series = np.zeros(n_steps + 1)
+
+    # Initial pressure values
     P_ideal_series[0] = ideal_gas_pressure(ps_q, sim_q)
-    P_virial_series[0] = total_pressure(ps_q, sim_q)
- 
+    P_virial_series[0] = virial_pressure(ps_q, sim_q)
+    P_total_series[0] = P_ideal_series[0] + P_virial_series[0]
+
     for i in range(n_steps):
         simulate_NVT_step(ps_q, sim_q)
+
         P_ideal_series[i + 1] = ideal_gas_pressure(ps_q, sim_q)
-        P_virial_series[i + 1] = total_pressure(ps_q, sim_q)
- 
-    # average over the post-equilibration window
+        P_virial_series[i + 1] = virial_pressure(ps_q, sim_q)
+        P_total_series[i + 1] = (
+            P_ideal_series[i + 1] + P_virial_series[i + 1]
+        )
+
+    # Average over the post-equilibration window
     P_ideal_avg = np.mean(P_ideal_series[n_equil:])
     P_virial_avg = np.mean(P_virial_series[n_equil:])
- 
-    return P_ideal_avg, P_virial_avg
+    P_total_avg = np.mean(P_total_series[n_equil:])
+
+    return P_ideal_avg, P_virial_avg, P_total_avg
  
 
 #----------------------------------------------------------------
@@ -198,7 +206,7 @@ position_trajectory[0,:,:] = ps.position # initial position
 energy_trajectory = np.zeros((sim.n_steps+1, 6))
 energy_trajectory[0,0] = potential_energy( ps, sim)       # potential energy
 energy_trajectory[0,1] = kinetic_energy(ps)               # kinetic energy
-energy_trajectory[0,2] = instantaneous_temperature(ps)    # instantaneous pressure
+energy_trajectory[0,2] = instantaneous_temperature(ps)    # instantaneous temperature
 energy_trajectory[0,3] = ideal_gas_pressure(ps, sim)      # ideal gas pressure
 energy_trajectory[0,4] = virial_pressure(ps, sim)         # virial contribution
 energy_trajectory[0,5] = energy_trajectory[0,3] + energy_trajectory[0,4]    # total pressure (ideal + virial)
@@ -231,7 +239,7 @@ for i in range(sim.n_steps):
 write_xyz_trajectory(file_name_base + "_pos.xyz", position_trajectory, atom_symbol="Ar")
 # write energy trajectory to file (binary and text)
 np.save(file_name_base + "_ene.npy", energy_trajectory)
-np.savetxt(file_name_base + "_ene.dat", energy_trajectory, fmt="%.6e", header="#E_pot  E_kin  T  P_ideal P_virial", comments='')
+np.savetxt(file_name_base + "_ene.dat", energy_trajectory, fmt="%.6e", header="# E_pot  E_kin  T  P_ideal  P_virial  P_total", comments='')
 
 
 #----------------------------------------------------
@@ -310,13 +318,13 @@ plt.figure(figsize=(8, 6))
 plt.plot(time_ps, energy_trajectory[:,5], color = 'green')
 plt.ylim(Ptotal_min, Ptotal_max)
 plt.xlabel("time [ps]", fontsize=14)
-plt.ylabel("P_virial [Pa]", fontsize=14)
+plt.ylabel("P_total [Pa]", fontsize=14)
  
-plt.savefig(file_name_base + "_Pvirial.png", dpi=300, bbox_inches='tight')
+plt.savefig(file_name_base + "_Ptotal.png", dpi=300, bbox_inches='tight')
 plt.show()
  
 #
-# ideal vs. virial pressure comparison
+# ideal, virial and total pressure comparison
 #
 plt.figure(figsize=(8, 6))
 plt.plot(time_ps, energy_trajectory[:,3], label="ideal gas pressure", alpha=0.8, color = 'orange')
@@ -325,7 +333,7 @@ plt.plot(time_ps, energy_trajectory[:,4], label="virial contribution", alpha=0.8
 plt.xlabel("time [ps]", fontsize=14)
 plt.ylabel("P [Pa]", fontsize=14)
 plt.legend(fontsize=12)
-plt.title("Ideal Pressure vs. Virial Pressure")
+plt.title("Ideal, Virial and Total Pressure")
  
 plt.savefig(file_name_base + "_P_compare.png", dpi=300, bbox_inches='tight')
 plt.show()
@@ -338,55 +346,131 @@ plt.show()
 # purely to keep the total runtime reasonable; increase n_particles/n_steps
 # for smoother, more accurate averages.
  
-print("\nRunning sigma sweep (this may take a while)...")
- 
-sigma_values = np.array([0.30, 0.32, 0.34, 0.36, 0.38, 0.40])   # nm
-epsilon_fixed = epsilon_argon
-box_length_fixed = box_length
- 
-P_ideal_vs_sigma = np.zeros_like(sigma_values)
-P_virial_vs_sigma = np.zeros_like(sigma_values)
- 
+sigma_values = np.array([0.30, 0.32, 0.34, 0.36, 0.38, 0.40])
+
+n_particles_sigma = 100
+box_length_sigma = 20
+n_steps_sigma = 3000
+n_equil_sigma = 500
+
+P_total_vs_sigma = np.zeros_like(sigma_values)
+
+# Fixed ideal-gas contribution at N = 100, T = 300 K and L = 20 nm
+V_sigma = (box_length_sigma * 1e-9) ** 3
+
+P_ideal_reference_sigma = (
+    n_particles_sigma * k * temperature / V_sigma
+)
+
 for idx, s in enumerate(sigma_values):
-    P_ideal_vs_sigma[idx], P_virial_vs_sigma[idx] = run_quick_simulation(
-        sigma=s, epsilon=epsilon_fixed, mass=mass_argon, seed=0)
- 
+
+    _, P_virial, _ = run_quick_simulation(
+        sigma=s,
+        epsilon=epsilon_argon,
+        mass=mass_argon,
+        n_particles=n_particles_sigma,
+        n_steps=n_steps_sigma,
+        temperature=temperature,
+        box_length=box_length_sigma,
+        n_equil=n_equil_sigma,
+        seed=0
+    )
+
+    P_total_vs_sigma[idx] = (
+        P_ideal_reference_sigma + P_virial
+    )
+
 plt.figure(figsize=(8, 6))
-plt.plot(sigma_values, P_ideal_vs_sigma, 'o-', label="ideal gas pressure", color = 'orange')
-plt.plot(sigma_values, P_virial_vs_sigma, 's-', label="virial pressure", color = 'green')
+
+plt.plot(
+    sigma_values,
+    P_total_vs_sigma,
+    "o-",
+    label="total pressure",
+    color="green"
+)
+
 plt.xlabel("sigma [nm]", fontsize=14)
-plt.ylabel("time-averaged P [Pa]", fontsize=14)
+plt.ylabel("time-averaged total pressure [Pa]", fontsize=14)
+
+plt.title(
+    f"Total pressure vs. sigma "
+    f"(N={n_particles_sigma}, L={box_length_sigma} nm)"
+)
+
 plt.legend(fontsize=12)
-plt.title(f"Pressure vs. sigma (epsilon = {epsilon_fixed:.4f} kJ/mol)")
- 
-plt.savefig(file_name_base + "_P_vs_sigma.png", dpi=300, bbox_inches='tight')
+
+plt.savefig(
+    file_name_base + "_P_vs_sigma.png",
+    dpi=300,
+    bbox_inches="tight"
+)
+
 plt.show()
  
 
 #------------------------------------------------------------
 # E F F E C T   O F   E P S I L O N   O N   P R E S S U R E
 #------------------------------------------------------------ 
-print("Running epsilon sweep (this may take a while)...")
- 
 epsilon_values = np.linspace(0.5, 2.0, 6) * epsilon_argon
-sigma_fixed = sigma_argon
- 
-P_ideal_vs_epsilon = np.zeros_like(epsilon_values)
-P_virial_vs_epsilon = np.zeros_like(epsilon_values)
- 
+
+n_particles_epsilon = 100
+box_length_epsilon = 20
+n_steps_epsilon = 3000
+n_equil_epsilon = 500
+
+P_total_vs_epsilon = np.zeros_like(epsilon_values)
+
+# Fixed ideal-gas contribution at N = 100, T = 300 K and L = 20 nm
+V_epsilon = (box_length_epsilon * 1e-9) ** 3
+P_ideal_reference = (
+    n_particles_epsilon * k * temperature / V_epsilon
+)
+
 for idx, e in enumerate(epsilon_values):
-    P_ideal_vs_epsilon[idx], P_virial_vs_epsilon[idx] = run_quick_simulation(
-        sigma=sigma_fixed, epsilon=e, mass=mass_argon, seed=0)
- 
+
+    _, P_virial, _ = run_quick_simulation(
+        sigma=sigma_argon,
+        epsilon=e,
+        mass=mass_argon,
+        n_particles=n_particles_epsilon,
+        n_steps=n_steps_epsilon,
+        temperature=temperature,
+        box_length=box_length_epsilon,
+        n_equil=n_equil_epsilon,
+        seed=0
+    )
+
+    P_total_vs_epsilon[idx] = (
+        P_ideal_reference + P_virial
+    )
+
 plt.figure(figsize=(8, 6))
-plt.plot(epsilon_values, P_ideal_vs_epsilon, 'o-', label="ideal gas pressure")
-plt.plot(epsilon_values, P_virial_vs_epsilon, 's-', label="virial pressure")
+
+plt.plot(
+    epsilon_values,
+    P_total_vs_epsilon,
+    "o-",
+    label="total pressure",
+    color="green"
+)
+
 plt.xlabel("epsilon [kJ/mol]", fontsize=14)
-plt.ylabel("time-averaged P [Pa]", fontsize=14)
+plt.ylabel("time-averaged total pressure [Pa]", fontsize=14)
+
+plt.title(
+    f"Total pressure vs. epsilon "
+    f"(N={n_particles_epsilon}, L={box_length_epsilon} nm)"
+)
+
 plt.legend(fontsize=12)
-plt.title(f"Pressure vs. epsilon (sigma = {sigma_fixed:.3f} nm)")
- 
-plt.savefig(file_name_base + "_P_vs_epsilon.png", dpi=300, bbox_inches='tight')
+
+plt.savefig(
+    file_name_base + "_P_vs_epsilon.png",
+    dpi=300,
+    bbox_inches="tight"
+)
+
 plt.show()
 
 
@@ -397,13 +481,14 @@ plt.show()
 print("\nRunning box-length (volume) sweep to test Boyle's law...")
  
 n_particles_fixed = 100   # keep N fixed across the sweep, same value used above
-box_length_values = np.array([170, 190, 210, 240, 270, 300, 320])   # nm
+box_length_values = np.array([50, 60, 70, 80, 90, 100, 120])   # nm
  
 P_ideal_vs_L = np.zeros_like(box_length_values, dtype=float)
 P_virial_vs_L = np.zeros_like(box_length_values, dtype=float)
+P_total_vs_L = np.zeros_like(box_length_values, dtype=float)
  
 for idx, L in enumerate(box_length_values):
-    P_ideal_vs_L[idx], P_virial_vs_L[idx] = run_quick_simulation(
+    P_ideal_vs_L[idx], P_virial_vs_L[idx], P_total_vs_L[idx] = run_quick_simulation(
         sigma=sigma_argon, epsilon=epsilon_argon, mass=mass_argon,
         n_particles=n_particles_fixed, box_length=L, seed=0)
  
@@ -413,8 +498,9 @@ V_values_m3 = (box_length_values.astype(float)**3) * 1e-27   # nm^3 -> m^3
 # P vs V
 #
 plt.figure(figsize=(8, 6))
-plt.plot(V_values_m3, P_ideal_vs_L, 'o-', label="ideal gas pressure")
-plt.plot(V_values_m3, P_virial_vs_L, 's-', label="virial pressure")
+plt.plot(V_values_m3, P_ideal_vs_L, 'o-', label="ideal gas pressure", color="orange")
+plt.plot(V_values_m3, P_virial_vs_L, 's-', label="virial contribution", color="blue")
+plt.plot(V_values_m3, P_total_vs_L, '^-', label="total pressure", color="green")
 plt.xlabel("V [m^3]", fontsize=14)
 plt.ylabel("time-averaged P [Pa]", fontsize=14)
 plt.legend(fontsize=12)
@@ -427,8 +513,9 @@ plt.show()
 # P*V vs V
 #
 plt.figure(figsize=(8, 6))
-plt.plot(V_values_m3, P_ideal_vs_L * V_values_m3, 'o-', label="ideal gas: P*V")
-plt.plot(V_values_m3, P_virial_vs_L * V_values_m3, 's-', label="virial: P*V")
+plt.plot(V_values_m3, P_ideal_vs_L * V_values_m3, 'o-', label="ideal gas: P*V", color="orange")
+plt.plot(V_values_m3, P_virial_vs_L * V_values_m3,'s-', label="virial contribution: P*V", color="blue")
+plt.plot(V_values_m3, P_total_vs_L * V_values_m3,'^-', label="total pressure: P*V", color="green")
 plt.xlabel("V [m^3]", fontsize=14)
 plt.ylabel("P*V [J]", fontsize=14)
 plt.legend(fontsize=12)
